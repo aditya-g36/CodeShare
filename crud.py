@@ -47,8 +47,13 @@ def update_note(note_url: str, request: schemas.Note, db: Session):
                    'message': f"Note with url {note_url} don't exists"}
         return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content=content)
 
-    db.query(models.Note).filter(models.Note.note_url == note_url).update(
-        request.model_dump(exclude_none=True))
+    if isinstance(request, schemas.Note):
+        update_data = request.dict(exclude_unset=True)
+    else:
+        update_data = request
+
+    for field, value in update_data.items():
+        setattr(note, field, value)
     db.commit()
 
     content = {'success': True,

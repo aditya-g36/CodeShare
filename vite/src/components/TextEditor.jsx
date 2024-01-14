@@ -8,11 +8,26 @@ const TextEditor = () => {
   const { noteID } = useParams();
   console.log(noteID);
   useEffect(() => {
-    if (socket.readyState === WebSocket.OPEN && noteID) {
-      socket.send(noteID.slice(1));
-      console.log(noteID.slice(1));
+    const sendNoteID = () => {
+      if (socket.readyState === WebSocket.OPEN && noteID) {
+        socket.send(noteID);
+        console.log(noteID);
+      }
+    };
+
+    // Check the state and send noteID once the socket is open
+    if (socket.readyState === WebSocket.OPEN) {
+      sendNoteID();
+    } else {
+      // Set up an event listener to wait for the socket to open
+      socket.addEventListener("open", sendNoteID);
     }
-  }, [socket.readyState, noteID]);
+
+    // Clean up the event listener when the component unmounts
+    return () => {
+      socket.removeEventListener("open", sendNoteID);
+    };
+  }, [socket, noteID]);
 
   const [value, setValue] = useState("");
 

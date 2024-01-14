@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 import secrets
 import json
+from fastapi.websockets import WebSocketDisconnect
+from starlette.websockets import WebSocket,WebSocketState
 
 from websocket_manager import ConnectionManager
 from database import engine, SessionLocal
@@ -66,9 +68,11 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, db: Session =
 
     await manager.connect(websocket)
     note_id = await websocket.receive_text()
+
     #pdb.set_trace()
     note_data = crud.get_note(db, note_id)
     note_data = note_data.to_dict()
+
     flag = False
 
     await manager.send_personal_message(note_data['note_content'], websocket)
@@ -81,8 +85,10 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, db: Session =
 
     except WebSocketDisconnect:
         if flag:
-            request = {'note_url': note_id, 'note_content': data}
-            request = json.dumps(request)
+          
+            request = {'note_url': note_id, 'note_content': data}      
             crud.update_note(note_id, request, db)
 
-        manager.disconnect(websocket)
+    finally:
+        if websocket.application_state == WebSocketState.CONNECTED:
+            manager.disconnect(websocket)
