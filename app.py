@@ -1,10 +1,10 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.websockets import WebSocketState
 from sqlalchemy.orm import Session
 import secrets
 import json
-from fastapi.websockets import WebSocketDisconnect
-from starlette.websockets import WebSocket,WebSocketState
+from collections import defaultdict
 
 from websocket_manager import ConnectionManager
 from database import engine, SessionLocal
@@ -44,51 +44,59 @@ def get_db():
 manager = ConnectionManager()
 
 
-# @app.get("/get/{note_url}/", response_model=schemas.Note)
-# def show(note_url: str, db: Session = Depends(get_db)):
-#     note = crud.get_note(db, note_url)
-#     return note
+@app.get("/exists/{note_id}/")
+def exists(note_id, db: Session = Depends(get_db)):
+    exists = db.query(models.Note).filter(
+        models.Note.note_url == note_id).first() is not None
+
+    data = {'exists': exists}
+
+    return data
 
 
-@app.get("/new/", response_model=schemas.Note)
-def new_note(db: Session = Depends(get_db)):
+@app.get("/new/{note_language}/", response_model=schemas.Note)
+def new_note(note_language: str, db: Session = Depends(get_db)):
     note_url = secrets.token_urlsafe(8)
-    db_note = crud.create_note(db, note_url)
+    db_note = crud.create_note(db, note_url, note_language)
     return db_note
 
 
-@app.put("/update/{note_url}", response_model=schemas.Note)
-def update_note(request: schemas.UpdateNote, note_url: str, db: Session = Depends(get_db)):
-
-    return crud.update_note(note_url, request, db)
+recent_data = defaultdict(None)
 
 
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str, db: Session = Depends(get_db)):
+    global recent_data
 
-    await manager.connect(websocket)
-    note_id = await websocket.receive_text()
-
-    #pdb.set_trace()
-    note_data = crud.get_note(db, note_id)
-    note_data = note_data.to_dict()
+    await manager.connect(websocket, client_id)
+    note_id = client_id
+    if note_id in recent_data and recent_data[note_id] is not None:
+        await websocket.send_json(recent_data[note_id])
+    else:
+        note_data = crud.get_note(db, note_id)
+        note_data = note_data.to_dict()
+        init_data = {'note_content': note_data['note_content'],
+                     'note_language': note_data['note_language']}
+        await websocket.send_json(init_data)
 
     flag = False
 
-    await manager.send_personal_message(note_data['note_content'], websocket)
-
     try:
         while True:
-            data = await websocket.receive_text()
+            data = await websocket.receive_json()
+            recent_data[note_id] = data
             flag = True
-            await manager.broadcast(data)
+            await manager.broadcast(data, note_id)
 
     except WebSocketDisconnect:
         if flag:
-          
-            request = {'note_url': note_id, 'note_content': data}      
-            crud.update_note(note_id, request, db)
+            if websocket.application_state == WebSocketState.CONNECTED:
+                request = {
+                    'note_url': note_id, 'note_content': data['note_content'], 'note_language': data['note_language']
+                }
+
+                crud.update_note(note_id, request, db)
 
     finally:
         if websocket.application_state == WebSocketState.CONNECTED:
-            manager.disconnect(websocket)
+            manager.disconnect(websocket, note_id)

@@ -6,7 +6,7 @@ import models
 import schemas
 
 
-def get_note(db: Session, note_url: str) :
+def get_note(db: Session, note_url: str):
     note = db.query(models.Note).filter(
         models.Note.note_url == note_url).first()
 
@@ -17,8 +17,9 @@ def get_note(db: Session, note_url: str) :
     return note
 
 
-def create_note(db: Session, note_url: str):
-    new_note = models.Note(note_url=note_url)
+def create_note(db: Session, note_url: str, note_language):
+    new_note = models.Note(
+        note_url=note_url, note_language=note_language)
     db.add(new_note)
     db.commit()
     db.refresh(new_note)
@@ -47,13 +48,8 @@ def update_note(note_url: str, request: schemas.Note, db: Session):
                    'message': f"Note with url {note_url} don't exists"}
         return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content=content)
 
-    if isinstance(request, schemas.Note):
-        update_data = request.dict(exclude_unset=True)
-    else:
-        update_data = request
-
-    for field, value in update_data.items():
-        setattr(note, field, value)
+    db.query(models.Note).filter(models.Note.note_url == note_url).update(
+        request)
     db.commit()
 
     content = {'success': True,
